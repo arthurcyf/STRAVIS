@@ -43,7 +43,7 @@ def find_control(root, **kwargs):
 
 def shift_select_down(n=20, delay=0.05):
     ctypes.windll.user32.keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYDOWN, 0)
-    time.sleep(0.05)
+    time.sleep(0.02)
     for _ in range(n):
         ctypes.windll.user32.keybd_event(VK_DOWN, 0, KEYEVENTF_KEYDOWN, 0)
         ctypes.windll.user32.keybd_event(VK_DOWN, 0, KEYEVENTF_KEYUP,   0)
@@ -67,13 +67,11 @@ def deselect_entity(code, search_delay=1.0, clear_delay=0.2):
     pyautogui.press('backspace')
     time.sleep(0.1)
 
-
 def press_open():
     for _ in range(3):
         ui.SendKeys('{TAB}')
         time.sleep(0.1)
     ui.SendKeys('{ENTER}')
-
 
 def find_with_retry(factory_fn, timeout=8, interval=0.2):
     end = time.time() + timeout
@@ -421,12 +419,14 @@ def run_automation(target_period: str, to_deselect: list[str], select_n: int = 2
     # 10) Select all, then deselect the provided list
     ui.SendKeys('{DOWN}')
     time.sleep(0.1)
-    shift_select_down(n=select_n, delay=0.05)
+    for _ in range(20):
+        ui.SendKeys('{UP}')
+        time.sleep(0.05)
+    shift_select_down(n=20, delay=0.05)
     ui.SendKeys('{SPACE}')
 
     for code in to_deselect:
-        if code.strip():
-            deselect_entity(code.strip())
+        deselect_entity(code)
 
     # 11) Run Display
     switch_ribbon_tab(stravis, 'Operation')
@@ -460,6 +460,8 @@ def run_automation(target_period: str, to_deselect: list[str], select_n: int = 2
         for _ in range(4):
             ui.SendKeys('{TAB}')
             time.sleep(0.1)
-        ui.SendKeys('{DOWN}')
+
+        for _ in range(3):
+            ui.SendKeys('{DOWN}')
     
     print("Download Complete")

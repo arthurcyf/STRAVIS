@@ -1,0 +1,8 @@
+uiautomation>=2.0
+PyAutoGUI>=0.9
+pillow>=10.0       # PyAutoGUI dependency (images)
+pywin32>=306       # UIA / Windows integration stability
+mouseinfo>=0.1     # PyAutoGUI dependency
+pyscreeze>=0.1     # PyAutoGUI dependency (screenshots)
+pytweening>=1.0    # PyAutoGUI dependency
+streamlit>=1.36

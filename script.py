@@ -547,6 +547,6 @@ def main():
     
     print("Downloading Complete.")
 
-    main()
+    
 if __name__ == '__main__':
-
+    main()

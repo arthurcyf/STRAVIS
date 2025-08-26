@@ -1,13 +1,3 @@
-# ───────────────────────────── script_core.py ─────────────────────────────
-"""
-Core automation entrypoint refactored from your script.py.
-Call run_automation(target_period, to_deselect) from any UI (e.g., Streamlit).
-
-Notes:
-- Run as Administrator for best UIA reliability.
-- Keep STRAVIS on the primary monitor and do not touch keyboard/mouse while it runs.
-- Move the mouse to the top-left corner to trigger PyAutoGUI failsafe if you need to abort.
-"""
 import time, re, ctypes, collections
 import pyautogui
 import uiautomation as ui

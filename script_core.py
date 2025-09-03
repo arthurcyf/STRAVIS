@@ -33,7 +33,7 @@ def find_control(root, **kwargs):
 
 def shift_select_down(n=20, delay=0.05):
     ctypes.windll.user32.keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYDOWN, 0)
-    time.sleep(0.02)
+    time.sleep(0.05)
     for _ in range(n):
         ctypes.windll.user32.keybd_event(VK_DOWN, 0, KEYEVENTF_KEYDOWN, 0)
         ctypes.windll.user32.keybd_event(VK_DOWN, 0, KEYEVENTF_KEYUP,   0)
@@ -316,6 +316,52 @@ def wait_dialog_gone(name='Save As', timeout=10, interval=0.2):
         time.sleep(interval)
     raise RuntimeError(f"Dialog '{name}' did not close in time")
 
+def is_checkbox_off(root=None, AutomationId='chkBookDisp', Name=None, searchDepth=30, timeout=5.0):
+    """
+    Returns True iff the checkbox's ToggleState is Off (0).
+    Defaults to the 'Show books' checkbox (AutomationId='chkBookDisp').
+    """
+    if root is None:
+        root = ui.WindowControl(Name='STRAVIS')
+        if not root.Exists(5, 0.2):
+            raise RuntimeError("STRAVIS window not found as root")
+
+    # IMPORTANT: search as a CheckBoxControl so the returned wrapper has TogglePattern
+    cb = root.CheckBoxControl(AutomationId=AutomationId, Name=Name, searchDepth=searchDepth)
+
+    end = time.time() + timeout
+    while time.time() < end:
+        if cb.Exists(0.2, 0.1):
+            break
+        time.sleep(0.1)
+
+    if not cb.Exists(0, 0):
+        desc = AutomationId or Name or "<unnamed>"
+        raise RuntimeError(f"Checkbox '{desc}' not found under {root}")
+
+    # Try normal TogglePattern first
+    try:
+        tp = cb.GetTogglePattern()
+        return tp.ToggleState == 0  # 0=Off, 1=On, 2=Indeterminate
+    except Exception:
+        pass
+
+    # Fallback: some hosts expose CurrentToggleState instead
+    try:
+        return cb.GetTogglePattern().CurrentToggleState == 0
+    except Exception:
+        pass
+
+    # Last resort: read the UIA property directly if available
+    try:
+        # UIA Toggle.ToggleState property id is commonly available via GetPropertyValue
+        # Not all versions expose constants; if yours doesn't, this call may raise.
+        return cb.GetPropertyValue(ui.TogglePattern.ToggleStateProperty) == 0
+    except Exception:
+        pass
+
+    raise RuntimeError("Could not read ToggleState (no TogglePattern/property available)")
+
 
 # ------------- MAIN PARAMETERIZED ENTRYPOINT -------------
 
@@ -423,6 +469,26 @@ def run_automation(target_period: str, to_deselect: list[str], select_n: int = 2
     click_button(base_input, Name='Display', AutomationId='btnDisp', searchDepth=30, timeout=8)
     wait_for_change(base_input, timeout=15, interval=0.5)
 
+    # click Tab and change to Period/Edition
+    ui.SendKeys('{TAB}')
+    time.sleep(0.2)
+    pyautogui.hotkey('alt', 'down')
+    for _ in range(4):
+        ui.SendKeys('{UP}')
+        time.sleep(0.1)
+    ui.SendKeys('{ENTER}')
+    # deselect after pressing TAB
+    if is_checkbox_off():
+        print("The 'Show books' checkbox is OFF")
+        for i in range(3):
+            ui.SendKeys('{TAB}')
+            time.sleep(0.1)
+    else:
+        # click it
+        cb = find_control(ui.WindowControl(Name='STRAVIS'), AutomationId='chkBookDisp')
+        cb.Click()
+        print("The 'Show books' checkbox is ON (or indeterminate)")
+
     # 12) Iterate items and save-as flow (unchanged from your logic)
     time.sleep(1)
     for _ in range(2):
@@ -436,7 +502,9 @@ def run_automation(target_period: str, to_deselect: list[str], select_n: int = 2
         press_e(root_for_waits=stravis)
 
         switch_ribbon_tab(stravis, 'Operation')
+        time.sleep(2)
         wait_until_tab_active(stravis, 'Operation')
+        time.sleep(1)
         click_save_as_excel(stravis)
         click_save_as_tree_item('Downloads')
         time.sleep(1)
@@ -451,7 +519,12 @@ def run_automation(target_period: str, to_deselect: list[str], select_n: int = 2
             ui.SendKeys('{TAB}')
             time.sleep(0.1)
 
-        for _ in range(3):
-            ui.SendKeys('{DOWN}')
+        # shift to the next entity
+        # for _ in range(3):
+        #     ui.SendKeys('{DOWN}')
+        ui.SendKeys('{DOWN}')
     
     print("Download Complete")
+
+if __name__ == '__main__':
+    run_automation("2025.03",["AN41_HSO_HMSP", "D941_HSO_HMSZ", "J34V_HSO_HOME"])

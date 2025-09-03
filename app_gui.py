@@ -1,9 +1,11 @@
 import os
-import threading
 import time
 import tkinter as tk
+import multiprocessing as mp
 from tkinter import ttk, messagebox
+
 from script_core import run_automation  # your existing automation
+
 
 ALL_ENTITIES = [
     "D341_HSO_HGM", "D342_HSO_HGMD", "CC41_HSO_HMIN", "C741_HSO_HMSH",
@@ -18,15 +20,44 @@ DEFAULT_SELECTED = [
     "A441_HSO_HSOT", "WB41_HSOU", "D841_HSO_HSOK",
 ]
 
+
 def downloads_dir() -> str:
     return os.path.join(os.path.expanduser("~"), "Downloads")
+
+
+def _worker_entry(target_period, to_deselect, iterations, result_q):
+    """
+    Child process entry point.
+    Initializes COM, waits 3s for focus, runs automation, reports result back to parent via Queue.
+    """
+    try:
+        try:
+            import pythoncom
+            pythoncom.CoInitialize()
+        except Exception:
+            # If pywin32 not available or COM init fails, still try to run; parent will show error if needed
+            pythoncom = None  # noqa: F841
+
+        time.sleep(3)
+        # Hardcode Shift+Down rows to 20 (same as before)
+        run_automation(target_period, to_deselect, select_n=20, iterations=iterations)
+        result_q.put(("ok", "Automation finished without raising errors."))
+    except Exception as e:
+        result_q.put(("err", f"Automation failed: {e}"))
+
 
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("STRAVIS Automation Runner")
-        self.geometry("760x560")
-        self.resizable(False, False)
+        # ✅ make window resizable
+        self.geometry("820x600")
+        self.resizable(True, True)
+
+        # State for child process & queue
+        self.proc: mp.Process | None = None
+        self.result_q: mp.Queue | None = None
+        self.poll_job = None
 
         ttk.Label(self, text="STRAVIS Automation Runner", font=("Segoe UI", 14, "bold")).pack(pady=(12, 2))
         ttk.Label(
@@ -36,17 +67,16 @@ class App(tk.Tk):
         ).pack()
 
         # Login requirement banner
-        login_banner = ttk.Label(
+        ttk.Label(
             self,
             text="You need to be logged into STRAVIS before running the automation.",
             foreground="#0a5"
-        )
-        login_banner.pack(pady=(2, 8))
+        ).pack(pady=(2, 8))
 
         # Where files go
         ttk.Label(
             self,
-            text=f"ℹ️ All files will be saved into your system's Downloads folder: {downloads_dir()}",
+            text=f"ℹ️ All files will be saved into your system's Downloads folder",
             foreground="#0a5"
         ).pack(pady=(0, 10))
 
@@ -74,10 +104,12 @@ class App(tk.Tk):
         ttk.Button(right, text="Select all", command=self.select_all).pack(side="left", padx=4)
         ttk.Button(right, text="Clear all", command=self.clear_all).pack(side="left")
 
-        # Checkboxes in 3 columns
+        # Checkboxes in a grid that expands
         self.vars = {}
-        grid = ttk.Frame(body)
-        grid.pack(fill="x", pady=6)
+        grid_wrap = ttk.Frame(body)
+        grid_wrap.pack(fill="both", expand=True, pady=6)
+        grid = ttk.Frame(grid_wrap)
+        grid.pack(anchor="nw")
         cols = 3
         for i, ent in enumerate(ALL_ENTITIES):
             r, c = divmod(i, cols)
@@ -96,18 +128,26 @@ class App(tk.Tk):
             command=self._update_run_state
         ).pack(side="left")
 
-        # Status + Run button
+        # Status + Run/Stop buttons
         bottom = ttk.Frame(self)
         bottom.pack(fill="x", padx=16, pady=12)
 
         self.status_var = tk.StringVar(value="Ready.")
         ttk.Label(bottom, textvariable=self.status_var, foreground="#444").pack(side="left")
 
-        self.run_btn = ttk.Button(bottom, text="Run automation", command=self.on_run, width=20)
+        btns = ttk.Frame(bottom)
+        btns.pack(side="right")
+        self.stop_btn = ttk.Button(btns, text="Stop", command=self.on_stop, width=12, state="disabled")
+        self.stop_btn.pack(side="right", padx=(8, 0))
+        self.run_btn = ttk.Button(btns, text="Run automation", command=self.on_run, width=16)
         self.run_btn.pack(side="right")
+
         self._update_run_state()
 
-        # Style
+        # Close handler to ensure child process is terminated
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        # Simple style improvements
         style = ttk.Style(self)
         if "vista" in style.theme_names():
             style.theme_use("vista")
@@ -128,7 +168,7 @@ class App(tk.Tk):
             v.set(False)
 
     def _update_run_state(self):
-        self.run_btn.config(state=("normal" if self.logged_in_var.get() else "disabled"))
+        self.run_btn.config(state=("normal" if self.logged_in_var.get() and self.proc is None else "disabled"))
 
     # ----- run flow -----
     def on_run(self):
@@ -159,41 +199,77 @@ class App(tk.Tk):
         if not messagebox.askokcancel("Heads up", msg):
             return
 
-        self.run_btn.config(state="disabled")
+        # Spin up child process
+        self.result_q = mp.Queue()
+        self.proc = mp.Process(target=_worker_entry, args=(target_period, to_deselect, iterations, self.result_q))
+        self.proc.daemon = True  # auto-kill with parent if needed
+        self.proc.start()
+
         self.status_var.set("Starting in 3 seconds… switch to STRAVIS now")
+        self.run_btn.config(state="disabled")
+        self.stop_btn.config(state="normal")
 
-        threading.Thread(
-            target=self._run_worker,
-            args=(target_period, to_deselect, iterations),
-            daemon=True
-        ).start()
+        # start polling for completion messages
+        self._poll_results()
 
-    def _run_worker(self, target_period, to_deselect, iterations):
-        """Worker thread: COM init here so pywin32/uiautomation/pywinauto can operate."""
-        pythoncom = None
-        try:
-            import pythoncom
-            pythoncom.CoInitialize()
-
-            time.sleep(3)  # let user focus STRAVIS
-            run_automation(target_period, to_deselect, select_n=20, iterations=iterations)
-
-        except ImportError as e:
-            self.after(0, self._done, False,
-                       "pywin32 is required for Windows automation.\n\nFix: pip install pywin32\n\n"
-                       f"Details: {e}")
-        except Exception as e:
-            self.after(0, self._done, False, f"Automation failed: {e}")
-        finally:
+    def _poll_results(self):
+        # If process ended, try to read final message
+        if self.proc is not None and not self.proc.is_alive():
             try:
-                if pythoncom:
-                    pythoncom.CoUninitialize()
+                kind, msg = (self.result_q.get_nowait() if self.result_q else ("err", "Unknown error"))
+            except Exception:
+                kind, msg = ("err", "Automation process ended unexpectedly.")
+            finally:
+                self._finalize_run(kind, msg)
+            return
+
+        # Process still running — check queue non-blocking
+        if self.result_q is not None:
+            try:
+                kind, msg = self.result_q.get_nowait()
+                # Got a result even though proc might still be alive — finalize and ensure process is gone
+                self._finalize_run(kind, msg)
+                return
             except Exception:
                 pass
 
-    def _done(self, ok: bool, message: str):
+        # keep polling ~200ms
+        self.poll_job = self.after(200, self._poll_results)
+
+    def on_stop(self):
+        if self.proc is None:
+            return
+        if messagebox.askokcancel("Stop automation", "Are you sure you want to stop the automation now?"):
+            try:
+                if self.poll_job:
+                    self.after_cancel(self.poll_job)
+                    self.poll_job = None
+                if self.proc.is_alive():
+                    self.proc.terminate()
+                    self.proc.join(timeout=2)
+            finally:
+                self._finalize_run("err", "Automation stopped by user.")
+
+    def _finalize_run(self, kind: str, message: str):
+        # Clean up process & polling
+        if self.poll_job:
+            self.after_cancel(self.poll_job)
+            self.poll_job = None
+        if self.proc:
+            try:
+                if self.proc.is_alive():
+                    self.proc.terminate()
+                self.proc.close()
+            except Exception:
+                pass
+        self.proc = None
+        self.result_q = None
+
         self.status_var.set(message)
-        if ok:
+        self.stop_btn.config(state="disabled")
+        self._update_run_state()
+
+        if kind == "ok":
             # Completed popup with option to open Downloads
             if messagebox.askyesno(
                 "Downloads complete",
@@ -206,8 +282,20 @@ class App(tk.Tk):
             else:
                 messagebox.showinfo("Done", message)
         else:
-            messagebox.showerror("Error", message)
-        self.run_btn.config(state="normal")
+            # Error / Stopped
+            messagebox.showerror("Automation ended", message)
+
+    def _on_close(self):
+        # Ensure child process is killed on exit
+        try:
+            if self.proc and self.proc.is_alive():
+                self.proc.terminate()
+        except Exception:
+            pass
+        self.destroy()
+
 
 if __name__ == "__main__":
+    # Required for multiprocessing on Windows when frozen (PyInstaller)
+    mp.freeze_support()
     App().mainloop()

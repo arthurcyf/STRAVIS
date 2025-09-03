@@ -1,4 +1,4 @@
-*** Steps: ***
+## Steps: 
 1. cd to root
 2. Create and activate a venv (PowerShell as Admin recommended):
    python -m venv .venv

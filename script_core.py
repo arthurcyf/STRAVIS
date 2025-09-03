@@ -30,31 +30,37 @@ def find_control(root, **kwargs):
         time.sleep(retry_interval)
     return None
 
-def log_down():
-    try:
-        ctypes.windll.user32.keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYDOWN, 0)
-        print("shift key held")
-    except Exception as e:
-        raise RuntimeError("could not press shift")
+# def log_down():
+#     try:
+#         ctypes.windll.user32.keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYDOWN, 0)
+#         print("shift key held")
+#     except Exception as e:
+#         raise RuntimeError("could not press shift")
 
-def log_up():
-    try:
-        ctypes.windll.user32.keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYUP, 0)
-        print("shift key released")
-    except Exception as e:
-        raise RuntimeError("could not release shift")
+# def log_up():
+#     try:
+#         ctypes.windll.user32.keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYUP, 0)
+#         print("shift key released")
+#     except Exception as e:
+#         raise RuntimeError("could not release shift")
 
 
-def shift_select_down(n=20, delay=0.05):
-    # ctypes.windll.user32.keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYDOWN, 0)
-    log_down()
-    time.sleep(0.05)
-    for _ in range(n):
-        ctypes.windll.user32.keybd_event(VK_DOWN, 0, KEYEVENTF_KEYDOWN, 0)
-        ctypes.windll.user32.keybd_event(VK_DOWN, 0, KEYEVENTF_KEYUP,   0)
-        time.sleep(delay)
-    # ctypes.windll.user32.keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYUP, 0)
-    log_up()
+# def shift_select_down(n=20, delay=0.05):
+#     # ctypes.windll.user32.keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYDOWN, 0)
+#     log_down()
+#     time.sleep(0.05)
+#     for _ in range(n):
+#         ctypes.windll.user32.keybd_event(VK_DOWN, 0, KEYEVENTF_KEYDOWN, 0)
+#         ctypes.windll.user32.keybd_event(VK_DOWN, 0, KEYEVENTF_KEYUP,   0)
+#         time.sleep(delay)
+#     # ctypes.windll.user32.keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYUP, 0)
+#     log_up()
+
+def shift_select_down(n=20, delay=0.08):
+    pyautogui.keyDown('shift')
+    time.sleep(0.15)  # give the target widget time to “see” the modifier
+    pyautogui.press('down', presses=n, interval=delay)
+    pyautogui.keyUp('shift')
 
 
 def deselect_entity(code, search_delay=1.0, clear_delay=0.2):
